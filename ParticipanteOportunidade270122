@@ -1,0 +1,124 @@
+global class ParticipanteOportunidade {
+    
+    global class oppParticipante {
+        
+        @InvocableVariable(required=true)
+        global String oppId;
+        
+        @InvocableVariable(required=true)
+        global String tipoParticipante;
+        
+        @InvocableVariable(required=true)
+        global String usuarioCorretor;
+ 
+    }
+    
+	@InvocableMethod
+    global static void CriaParticipantesOportunidade(List <oppParticipante> inputs){
+        
+	 Map<String, String> tipoConsultor = new Map<String, String>{'02' => 'Imobiliária', '05' => 'Consultor Pre Venda', '07' => 'Consultor de Atendimento', '12' => 'Autônomo'  };
+     List<String> tipoConsultorList = new List<String>{'02', '05', '07', '12'};
+     List<String> tipoAnalistaList = new List<String>{'06', '11'};
+     List<ParticipanteOportunidade__c> participanteOpp;
+	 Participante__c participante;
+
+        for (oppParticipante oppPart : inputs) {
+            
+         Opportunity oportunidade = [SELECT Id, StageName, OwnerId, Tecnico__c ,SupervisorVenda__c,AnalistaCredito__c,SupervisorCredito__c,AssistenteContratos__c, Corretor__c, Corretor__r.Id, Corretor__r.Name FROM Opportunity WHERE Id=:oppPart.oppId];
+         String faseOpp = oportunidade.StageName;
+            
+
+            if(tipoConsultor.keyset().contains(oppPart.tipoParticipante)) {  
+                
+                System.debug(''+oppPart.tipoParticipante);
+                
+                //É consultor - Consulto o participante pelo campo Corretor  
+                participante = [SELECT Id, Name, Corretor__c, Usuario__c, TipoParticipante__c, ComissaoVoce__c, ComissaoCaixa__c FROM Participante__c WHERE TipoParticipante__c = :tipoConsultorList AND Corretor__c = :oppPart.usuarioCorretor ];  
+            	System.debug(participante);
+                // Verifica se este participante existe - Corretor
+         		participanteOpp = [SELECT Id, Name, Participante__r.ChapaTOTVS__c, Participante__r.Usuario__c, Participante__r.TipoParticipante__c, Participante__c, Oportunidade__c  FROM ParticipanteOportunidade__c WHERE Oportunidade__c = :oppPart.oppId AND Participante__r.TipoParticipante__c = :tipoConsultorList ];
+
+            }
+            
+            /*else if(oppPart.tipoParticipante == '06' || oppPart.tipoParticipante == '11'){
+                
+                 É do credito - Consulto o participante pelo campo Usuário
+                participante = [SELECT Id, Name, Corretor__c, TipoParticipante__c, ComissaoVoce__c, ComissaoCaixa__c FROM Participante__c WHERE TipoParticipante__c = :tipoAnalistaList AND Usuario__c = :oppPart.usuarioCorretor ];  
+            	
+                 Verifica se este participante existe - Analista ou Auxiliar
+         		participanteOpp = [SELECT Id, Name, Participante__r.ChapaTOTVS__c, Participante__r.Usuario__c, Participante__r.TipoParticipante__c, Participante__c, Oportunidade__c  FROM ParticipanteOportunidade__c WHERE Oportunidade__c = :oppPart.oppId AND Participante__r.TipoParticipante__c = :tipoAnalistaList ];
+
+                
+            }*/
+            else{
+                
+                //É usuário - Consulto o participante pelo campo Usuário
+                participante = [SELECT Id, Name, Usuario__c, TipoParticipante__c, ComissaoVoce__c, ComissaoCaixa__c FROM Participante__c WHERE TipoParticipante__c = :oppPart.tipoParticipante AND Usuario__c = :oppPart.usuarioCorretor ];   
+           		System.debug(participante);
+                // Verifica se este participante existe - Usuário
+         		participanteOpp = [SELECT Id, Name, Participante__r.ChapaTOTVS__c, Participante__r.Usuario__c, Participante__r.TipoParticipante__c, Participante__c, Oportunidade__c  FROM ParticipanteOportunidade__c WHERE Oportunidade__c = :oppPart.oppId AND Participante__r.TipoParticipante__c = :oppPart.tipoParticipante ];
+		 
+            }
+
+            if(participanteOpp.size() > 0){
+                
+                //Atualizar oportunidade
+                for(ParticipanteOportunidade__c partOpp : participanteOpp){
+                
+                  Map<String, String> fases = new Map<String, String>{'Proposta' => 'Proposta', 'Análise de crédito' => 'Análise de crédito', 'Cadastro do Plano de Pagamento' => 'Cadastro do Plano de Pagamento' };
+ 
+                    if(fases.keyset().contains(faseOpp)){ 	
+                        
+                      partOpp.Participante__c = participante.Id;
+                      partOpp.Name = participante.Name;
+                      partOpp.ComissaoVoce__c = participante.ComissaoVoce__c;
+                	  partOpp.ComissaoCaixa__c = participante.ComissaoCaixa__c;
+                        
+         
+                      update partOpp;
+                    }
+                }  
+            }
+            
+            else{
+                
+                //Criar participante
+                ParticipanteOportunidade__c novoParticipante = new ParticipanteOportunidade__c();
+                
+                novoParticipante.Name = participante.Name;
+                novoParticipante.Oportunidade__c = oppPart.oppId;
+                novoParticipante.Participante__c = participante.Id;
+                novoParticipante.ComissaoVoce__c = participante.ComissaoVoce__c;
+                novoParticipante.ComissaoCaixa__c = participante.ComissaoCaixa__c;
+                
+                insert novoParticipante;
+
+                /* 24/11/21 Dois técnicos para o residencial Jacarandá (utilizam mesmo usuário e comissão dividida)
+                 condição para criar o participante Ulysses (Auxiliar Técnico de Engenharia para o Jacarandá)
+                 	então: se tecnico da oportunidade for o usuário LAURA/ULYSSES - TECNICA(O) JACARANDA 
+						   insere o participante que tem o usuario vinculado(laura) e cria o do Ulysses para
+						   a mesma oportunidade.*/
+                 
+                if((participante.Usuario__c == '0055C000003nPGHQA2') && (participante.TipoParticipante__c == '09')){ // usuario dev 0055C000003nPGHQA2   | prod: 0051U000008OnF2QAK
+                    Participante__c participanteNovoTecnico;
+                    
+                    participanteNovoTecnico = [SELECT Id, Name, Usuario__c, Corretor__c, TipoParticipante__c, ComissaoVoce__c, ComissaoCaixa__c FROM Participante__c WHERE TipoParticipante__c =:participante.TipoParticipante__c  AND Id = 'a0n5C000000fgDbQAI'];  
+					//participante dev: a0o5C000002gx7GQAQ |prod: a0p1U00000HKGcmQAH
+					
+                    ParticipanteOportunidade__c novoParticipanteOppTecnico = new ParticipanteOportunidade__c();
+                    
+                    novoParticipanteOppTecnico.Name = participanteNovoTecnico.Name;
+                    novoParticipanteOppTecnico.Oportunidade__c = novoParticipante.Oportunidade__c;
+                    novoParticipanteOppTecnico.Participante__c = participanteNovoTecnico.Id;
+                    novoParticipanteOppTecnico.ComissaoVoce__c = participanteNovoTecnico.ComissaoVoce__c;
+                    novoParticipanteOppTecnico.ComissaoCaixa__c = participanteNovoTecnico.ComissaoCaixa__c;
+                    
+                    insert novoParticipanteOppTecnico;
+                    System.debug('inseriu ulysses ------ ' + novoParticipanteOppTecnico);
+                }
+                
+                
+            }
+    	}
+	}   
+}
